@@ -309,9 +309,9 @@ func TestLoadPromptsEmptyDirsCreatesDefaults(t *testing.T) {
 
 	prompts := LoadPrompts(globalDir, projectDir)
 
-	// Should create 5 default prompts
-	if len(prompts) != 5 {
-		t.Errorf("Expected 5 default prompts, got %d", len(prompts))
+	// Should create 6 default prompts
+	if len(prompts) != 6 {
+		t.Errorf("Expected 6 default prompts, got %d", len(prompts))
 	}
 
 	// Verify config file was created
@@ -331,17 +331,18 @@ func TestLoadPromptsEmptyDirsCreatesDefaults(t *testing.T) {
 func TestDefaultPrompts(t *testing.T) {
 	prompts := DefaultPrompts()
 
-	if len(prompts) != 5 {
-		t.Fatalf("Expected 5 default prompts, got %d", len(prompts))
+	if len(prompts) != 6 {
+		t.Fatalf("Expected 6 default prompts, got %d", len(prompts))
 	}
 
 	// Verify expected prompt names exist
 	expectedNames := map[string]bool{
-		"Begin Work on Ticket":    false,
-		"Code Review Ticket":      false,
-		"Plan to Epic (No Impl)":  false,
-		"Plan to Epic + Implement": false,
-		"TD Review Session":       false,
+		"Begin Work on Ticket":  false,
+		"Brainstorm Feature":    false,
+		"Plan Feature":          false,
+		"Full Feature Pipeline": false,
+		"Code Review":           false,
+		"TD Review Session":     false,
 	}
 
 	for _, p := range prompts {
@@ -359,13 +360,43 @@ func TestDefaultPrompts(t *testing.T) {
 	// Verify ticketMode settings
 	for _, p := range prompts {
 		switch p.Name {
-		case "Begin Work on Ticket", "Code Review Ticket":
+		case "Begin Work on Ticket":
 			if p.TicketMode != TicketRequired {
 				t.Errorf("Prompt %q TicketMode = %q, want 'required'", p.Name, p.TicketMode)
+			}
+		case "Plan Feature", "Full Feature Pipeline", "Code Review":
+			if p.TicketMode != TicketOptional {
+				t.Errorf("Prompt %q TicketMode = %q, want 'optional'", p.Name, p.TicketMode)
 			}
 		default:
 			if p.TicketMode != TicketNone {
 				t.Errorf("Prompt %q TicketMode = %q, want 'none'", p.Name, p.TicketMode)
+			}
+		}
+	}
+
+	// Verify RequiresPlugin is set on compound-engineering prompts
+	const compoundPlugin = "compound-engineering@every-marketplace"
+	compoundPrompts := map[string]bool{
+		"Begin Work on Ticket":  false,
+		"Brainstorm Feature":    false,
+		"Plan Feature":          false,
+		"Full Feature Pipeline": false,
+		"Code Review":           false,
+	}
+	for _, p := range prompts {
+		if _, ok := compoundPrompts[p.Name]; ok {
+			if p.RequiresPlugin != compoundPlugin {
+				t.Errorf("Prompt %q RequiresPlugin = %q, want %q", p.Name, p.RequiresPlugin, compoundPlugin)
+			}
+		}
+	}
+
+	// Verify TD Review Session has no RequiresPlugin (it's td-only, not compound-engineering)
+	for _, p := range prompts {
+		if p.Name == "TD Review Session" {
+			if p.RequiresPlugin != "" {
+				t.Errorf("Prompt %q should have no RequiresPlugin, got %q", p.Name, p.RequiresPlugin)
 			}
 		}
 	}
@@ -412,8 +443,8 @@ func TestWriteDefaultPromptsToConfig_NewFile(t *testing.T) {
 	}
 
 	prompts := LoadPrompts(dir, t.TempDir())
-	if len(prompts) != 5 {
-		t.Errorf("Expected 5 prompts, got %d", len(prompts))
+	if len(prompts) != 6 {
+		t.Errorf("Expected 6 prompts, got %d", len(prompts))
 	}
 }
 
@@ -432,8 +463,8 @@ func TestWriteDefaultPromptsToConfig_MergesExisting(t *testing.T) {
 
 	// Verify prompts were added
 	prompts := LoadPrompts(dir, t.TempDir())
-	if len(prompts) != 5 {
-		t.Errorf("Expected 5 prompts, got %d", len(prompts))
+	if len(prompts) != 6 {
+		t.Errorf("Expected 6 prompts, got %d", len(prompts))
 	}
 
 	// Verify other fields preserved
@@ -456,10 +487,10 @@ func TestWriteDefaultPromptsToConfig_OverwritesPrompts(t *testing.T) {
 		t.Fatal("WriteDefaultPromptsToConfig returned false")
 	}
 
-	// Should now have 5 default prompts (custom was replaced)
+	// Should now have 6 default prompts (custom was replaced)
 	prompts := LoadPrompts(dir, t.TempDir())
-	if len(prompts) != 5 {
-		t.Errorf("Expected 5 prompts, got %d", len(prompts))
+	if len(prompts) != 6 {
+		t.Errorf("Expected 6 prompts, got %d", len(prompts))
 	}
 }
 
@@ -477,8 +508,8 @@ func TestWriteDefaultPromptsToConfig_InvalidJSON(t *testing.T) {
 
 	// Should recover and write valid config with defaults
 	prompts := LoadPrompts(dir, t.TempDir())
-	if len(prompts) != 5 {
-		t.Errorf("Expected 5 prompts after invalid JSON recovery, got %d", len(prompts))
+	if len(prompts) != 6 {
+		t.Errorf("Expected 6 prompts after invalid JSON recovery, got %d", len(prompts))
 	}
 }
 
@@ -491,7 +522,63 @@ func TestWriteDefaultPromptsToConfig_CreatesDirectory(t *testing.T) {
 	}
 
 	prompts := LoadPrompts(dir, t.TempDir())
-	if len(prompts) != 5 {
-		t.Errorf("Expected 5 prompts, got %d", len(prompts))
+	if len(prompts) != 6 {
+		t.Errorf("Expected 6 prompts, got %d", len(prompts))
+	}
+}
+
+func TestIsPluginInstalled_Present(t *testing.T) {
+	dir := t.TempDir()
+	registry := `{"version":1,"plugins":{"compound-engineering@every-marketplace":{"version":"2.31.1","installPath":"/tmp/ce"}}}`
+	pluginsDir := filepath.Join(dir, ".claude", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginsDir, "installed_plugins.json"), []byte(registry), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", dir)
+	if !IsPluginInstalled("compound-engineering@every-marketplace") {
+		t.Error("Expected IsPluginInstalled to return true when key is present")
+	}
+}
+
+func TestIsPluginInstalled_Absent(t *testing.T) {
+	dir := t.TempDir()
+	registry := `{"version":1,"plugins":{"other-plugin@some-marketplace":{"version":"1.0.0"}}}`
+	pluginsDir := filepath.Join(dir, ".claude", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginsDir, "installed_plugins.json"), []byte(registry), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", dir)
+	if IsPluginInstalled("compound-engineering@every-marketplace") {
+		t.Error("Expected IsPluginInstalled to return false when key is absent")
+	}
+}
+
+func TestIsPluginInstalled_FileNotFound(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	// No installed_plugins.json created
+	if IsPluginInstalled("compound-engineering@every-marketplace") {
+		t.Error("Expected IsPluginInstalled to return false when file does not exist")
+	}
+}
+
+func TestIsPluginInstalled_MalformedJSON(t *testing.T) {
+	dir := t.TempDir()
+	pluginsDir := filepath.Join(dir, ".claude", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginsDir, "installed_plugins.json"), []byte("not valid json{{{"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", dir)
+	if IsPluginInstalled("compound-engineering@every-marketplace") {
+		t.Error("Expected IsPluginInstalled to return false for malformed JSON")
 	}
 }

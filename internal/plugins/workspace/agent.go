@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
+	app "github.com/marcus/sidecar/internal/app"
 	"github.com/marcus/sidecar/internal/features"
 )
 
@@ -535,6 +536,17 @@ func (p *Plugin) getAgentCommandWithContext(agentType AgentType, wt *Worktree) s
 func (p *Plugin) StartAgentWithOptions(wt *Worktree, agentType AgentType, skipPerms bool, prompt *Prompt) tea.Cmd {
 	epoch := p.ctx.Epoch // Capture epoch for stale detection
 	return func() tea.Msg {
+		// Check that the required Claude Code plugin is installed before creating any workspace resources.
+		if prompt != nil && prompt.RequiresPlugin != "" {
+			if !IsPluginInstalled(prompt.RequiresPlugin) {
+				return app.ToastMsg{
+					Message:  ErrPluginNotInstalled,
+					Duration: 6 * time.Second,
+					IsError:  true,
+				}
+			}
+		}
+
 		sessionName := tmuxSessionPrefix + sanitizeName(wt.Name)
 
 		// Check if session already exists
