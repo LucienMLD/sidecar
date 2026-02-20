@@ -20,10 +20,11 @@ const (
 
 // Prompt represents a configurable prompt template.
 type Prompt struct {
-	Name       string     `json:"name"`
-	TicketMode TicketMode `json:"ticketMode"`
-	Body       string     `json:"body"`
-	Source     string     `json:"-"` // "global" or "project" (set at load time)
+	Name           string     `json:"name"`
+	TicketMode     TicketMode `json:"ticketMode"`
+	Body           string     `json:"body"`
+	Source         string     `json:"-"` // "global" or "project" (set at load time)
+	RequiresPlugin string     `json:"-"` // Claude Code plugin ID required (e.g. "compound-engineering@every-marketplace"), not serialized
 }
 
 // configWithPrompts is the config structure for loading prompts.
@@ -125,30 +126,74 @@ func HasTicketPlaceholder(body string) bool {
 
 // DefaultPrompts returns the built-in default prompts.
 // These serve as examples users can modify.
+// Prompts with RequiresPlugin set require the corresponding Claude Code plugin to be installed
+// before a workspace can be launched.
 func DefaultPrompts() []Prompt {
+	const compoundPlugin = "compound-engineering@every-marketplace"
 	return []Prompt{
 		{
-			Name:       "Begin Work on Ticket",
-			TicketMode: TicketRequired,
-			Body:       "Start work on {{ticket}}. Use td to track progress.",
-			Source:     "default",
+			Name:           "Begin Work on Ticket",
+			TicketMode:     TicketRequired,
+			RequiresPlugin: compoundPlugin,
+			Body: `td usage --new-session
+
+Review ticket {{ticket}}.
+
+If the ticket lacks clear acceptance criteria or has open questions, run:
+/workflows:brainstorm {{ticket}}
+
+Otherwise, run:
+/workflows:plan {{ticket}}
+
+Then execute the plan with:
+/workflows:work`,
+			Source: "default",
+		},
+		{
+			Name:           "Brainstorm Feature",
+			TicketMode:     TicketNone,
+			RequiresPlugin: compoundPlugin,
+			Body: `td usage --new-session
+
+/workflows:brainstorm`,
+			Source: "default",
+		},
+		{
+			Name:           "Plan Feature",
+			TicketMode:     TicketOptional,
+			RequiresPlugin: compoundPlugin,
+			Body: `td usage --new-session
+
+/workflows:plan {{ticket || 'this feature'}}`,
+			Source: "default",
+		},
+		{
+			Name:           "Plan to Epic (No Impl)",
+			TicketMode:     TicketNone,
+			RequiresPlugin: compoundPlugin,
+			Body: `td usage --new-session
+
+/workflows:plan
+
+Do not implement. Create sub-tasks with td after planning.`,
+			Source: "default",
+		},
+		{
+			Name:           "Plan to Epic + Implement",
+			TicketMode:     TicketNone,
+			RequiresPlugin: compoundPlugin,
+			Body: `td usage --new-session
+
+/workflows:plan
+
+Then implement with:
+/workflows:work`,
+			Source: "default",
 		},
 		{
 			Name:       "Code Review Ticket",
 			TicketMode: TicketRequired,
 			Body:       "Do a detailed code review of {{ticket}}. Focus on correctness and tests.",
-			Source:     "default",
-		},
-		{
-			Name:       "Plan to Epic (No Impl)",
-			TicketMode: TicketNone,
-			Body:       "Plan this task into an epic with sub-tasks using td. Do not implement yet.",
-			Source:     "default",
-		},
-		{
-			Name:       "Plan to Epic + Implement",
-			TicketMode: TicketNone,
-			Body:       "Plan this task into an epic with sub-tasks using td, then implement them.",
 			Source:     "default",
 		},
 		{
@@ -188,6 +233,35 @@ func EnsureDefaultPrompts(globalConfigDir string) bool {
 	}
 
 	return true
+}
+
+// ErrPluginNotInstalled is shown when a compound-workflow prompt is selected
+// but the required Claude Code plugin is not installed.
+const ErrPluginNotInstalled = "compound-engineering plugin required. Install it via: claude plugins install compound-engineering@every-marketplace"
+
+// installedPluginsRegistry is the JSON structure of ~/.claude/plugins/installed_plugins.json.
+type installedPluginsRegistry struct {
+	Plugins map[string]json.RawMessage `json:"plugins"`
+}
+
+// IsPluginInstalled checks whether a Claude Code plugin with the given ID is installed
+// by reading ~/.claude/plugins/installed_plugins.json.
+// Returns false on any error (file absent, malformed JSON, key not found).
+func IsPluginInstalled(pluginID string) bool {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"))
+	if err != nil {
+		return false
+	}
+	var registry installedPluginsRegistry
+	if err := json.Unmarshal(data, &registry); err != nil {
+		return false
+	}
+	_, ok := registry.Plugins[pluginID]
+	return ok
 }
 
 // WriteDefaultPromptsToConfig merges default prompts into the global config.

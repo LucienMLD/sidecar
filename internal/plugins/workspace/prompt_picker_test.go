@@ -95,8 +95,8 @@ func TestInstallDefaultsRoundTrip(t *testing.T) {
 	}
 
 	prompts := LoadPrompts(configDir, workDir)
-	if len(prompts) != 5 {
-		t.Fatalf("Expected 5 prompts after install, got %d", len(prompts))
+	if len(prompts) != 7 {
+		t.Fatalf("Expected 7 prompts after install, got %d", len(prompts))
 	}
 
 	pp := NewPromptPicker(prompts, 80, 24)
