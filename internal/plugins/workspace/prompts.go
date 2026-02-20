@@ -128,6 +128,9 @@ func HasTicketPlaceholder(body string) bool {
 // These serve as examples users can modify.
 // Prompts with RequiresPlugin set require the corresponding Claude Code plugin to be installed
 // before a workspace can be launched.
+//
+// The prompts delegate directly to compound-engineering plugin commands rather than duplicating
+// their logic. This ensures they stay up-to-date as the plugin evolves.
 func DefaultPrompts() []Prompt {
 	const compoundPlugin = "compound-engineering@every-marketplace"
 	return []Prompt{
@@ -137,16 +140,7 @@ func DefaultPrompts() []Prompt {
 			RequiresPlugin: compoundPlugin,
 			Body: `td usage --new-session
 
-Review ticket {{ticket}}.
-
-If the ticket lacks clear acceptance criteria or has open questions, run:
-/workflows:brainstorm {{ticket}}
-
-Otherwise, run:
-/workflows:plan {{ticket}}
-
-Then execute the plan with:
-/workflows:work`,
+/workflows:plan {{ticket}}`,
 			Source: "default",
 		},
 		{
@@ -168,33 +162,26 @@ Then execute the plan with:
 			Source: "default",
 		},
 		{
-			Name:           "Plan to Epic (No Impl)",
-			TicketMode:     TicketNone,
+			Name:           "Full Feature Pipeline",
+			TicketMode:     TicketOptional,
 			RequiresPlugin: compoundPlugin,
 			Body: `td usage --new-session
 
-/workflows:plan
+Full compound-engineering workflow for {{ticket || 'this feature'}}:
 
-Do not implement. Create sub-tasks with td after planning.`,
+1. /workflows:plan
+2. /deepen-plan
+3. /workflows:work
+4. /workflows:review
+5. /workflows:compound`,
 			Source: "default",
 		},
 		{
-			Name:           "Plan to Epic + Implement",
-			TicketMode:     TicketNone,
+			Name:           "Code Review",
+			TicketMode:     TicketOptional,
 			RequiresPlugin: compoundPlugin,
-			Body: `td usage --new-session
-
-/workflows:plan
-
-Then implement with:
-/workflows:work`,
-			Source: "default",
-		},
-		{
-			Name:       "Code Review Ticket",
-			TicketMode: TicketRequired,
-			Body:       "Do a detailed code review of {{ticket}}. Focus on correctness and tests.",
-			Source:     "default",
+			Body:           `/workflows:review {{ticket || 'current changes'}}`,
+			Source:         "default",
 		},
 		{
 			Name:       "TD Review Session",
